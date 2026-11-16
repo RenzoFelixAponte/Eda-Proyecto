@@ -1,0 +1,4 @@
+build/
+informe/*.aux
+informe/*.log
+informe/*.out

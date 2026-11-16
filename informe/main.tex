@@ -1,0 +1,726 @@
+\documentclass[11pt,a4paper]{article}
+
+% ============================================================
+%  Paquetes
+% ============================================================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-tabla,es-nodecimaldot]{babel}
+\usepackage{lmodern}
+\usepackage[hmargin=2.5cm,vmargin=2.2cm,headsep=14pt]{geometry}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{float}
+\usepackage{graphicx}
+\graphicspath{{../figures/}}
+
+\usepackage[table]{xcolor}
+\usepackage{enumitem}
+\usepackage[font=small,labelfont=bf,labelsep=period]{caption}
+\usepackage{fancyhdr}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,babel,decorations.pathreplacing}
+\usepackage[hidelinks]{hyperref}
+
+\setlist{itemsep=2pt, topsep=4pt}
+\setlength{\parskip}{2pt}
+\raggedbottom
+
+% Encabezado y pie
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small CS3014 -- Estructuras de Datos Avanzadas}
+\fancyhead[R]{\small Informe final: Skip List vs.\ AVL Tree}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% Estilos de las figuras
+\tikzset{
+  >=Stealth,
+  cell/.style={draw, minimum width=6mm, minimum height=4.2mm, inner sep=0pt},
+  keycell/.style={cell, font=\small},
+  tnode/.style={circle, draw, minimum size=6.5mm, inner sep=0pt, font=\small},
+  stepbox/.style={draw, rounded corners=2pt, align=center, font=\small,
+                  minimum height=10mm, text width=1.95cm, inner sep=3pt},
+}
+\newcommand{\on}{\cellcolor{gray!45}}
+
+% ============================================================
+\begin{document}
+
+\thispagestyle{empty}
+\begin{center}
+  {\LARGE\bfseries Skip List frente a AVL Tree}\\[5pt]
+  {\large una evaluación experimental sobre conjuntos ordenados dinámicos}\\[14pt]
+  {\normalsize Renzo Josimar Felix Aponte \qquad Manyory Estefany Cueva Mendoza}\\[2pt]
+  {\normalsize Jefersson Kevin Quicaña Erquinio}\\[6pt]
+  {\small Universidad de Ingeniería y Tecnología (UTEC)}\\
+  {\small CS3014 -- Estructuras de Datos Avanzadas \quad$\cdot$\quad Noviembre de 2026}
+\end{center}
+\vspace{2pt}
+\noindent\rule{\textwidth}{0.4pt}
+
+\begin{abstract}
+\noindent
+Implementamos desde cero, en C++17 y con una arquitectura hexagonal, una Skip
+List y un AVL Tree, y comparamos experimentalmente su tiempo de búsqueda,
+inserción y eliminación con tamaños de entrada entre $10^3$ y $10^6$ y datos en
+orden aleatorio, ordenado e inverso. Ambas estructuras tienen costo
+$O(\log n)$ (esperado en la skip list, de peor caso en el AVL). En nuestras
+mediciones el AVL fue más rápido en las tres operaciones y en todos los
+escenarios: con $n = 10^6$ y datos aleatorios, la búsqueda fue unas
+$2.6$ veces más rápida y la inserción y la eliminación unas $2$ veces. El
+orden de los datos afectó mucho más que la estructura elegida: insertar claves
+ordenadas fue hasta $8$ veces más rápido que insertarlas al azar en ambas
+estructuras, lo que atribuimos a la localidad de caché.
+\end{abstract}
+\noindent\rule{\textwidth}{0.4pt}
+
+% ============================================================
+\section{Introducción y motivación}
+
+\paragraph{El problema.}
+Muchos programas necesitan mantener un conjunto de claves ordenadas que cambia
+con el tiempo: se insertan claves nuevas, se buscan claves existentes y se
+eliminan otras. Esto aparece, por ejemplo, en el índice de una base de datos o en
+el \texttt{std::set} de C++.
+
+\paragraph{Las dos soluciones.}
+La solución clásica son los árboles binarios de búsqueda balanceados, como el
+AVL Tree, que garantizan $O(\log n)$ por operación en el peor caso a cambio
+de aplicar rotaciones para mantenerse balanceados. En 1990, Pugh propuso la
+\emph{skip list}~\cite{pugh1990} como alternativa: varias listas enlazadas
+ordenadas, una encima de otra, donde la altura de cada nodo se decide al azar.
+Así se obtiene $O(\log n)$ esperado sin rotaciones. Según el survey de
+Xing, Vadrevu y Aref~\cite{vadrevu2024}, hoy la skip list se usa en sistemas
+reales como LevelDB, RocksDB, Redis y la clase
+\texttt{ConcurrentSkipListMap} de Java.
+
+\paragraph{Por qué compararlas.}
+Aunque dos estructuras tengan la misma complejidad asintótica, eso no dice cuál
+es más rápida en la práctica. Las constantes ocultas, el número de punteros por nodo,
+el uso de la memoria caché o el orden en que llegan los datos pueden cambiar el
+tiempo real. Por eso queremos implementar ambas y medirlas bajo las mismas condiciones.
+
+
+% ============================================================
+\section{Conceptos y trabajo relacionado}\label{sec:conceptos}
+
+\subsection{Skip List}
+
+\paragraph{Idea.}
+Una skip list está formada por varios niveles. El nivel 1 es una lista enlazada
+ordenada con todas las claves. Cada nivel superior contiene solo una parte de
+las claves del nivel de abajo y funciona como un ``carril rápido'' que permite
+saltar varios nodos de una vez. Una cabecera tiene un puntero por nivel
+(Figura~\ref{fig:skiplist}).
+
+\begin{figure}[!htb]
+\centering
+\begin{tikzpicture}[x=1.25cm, y=4.2mm]
+  \foreach \n/\x/\h/\k in {H/0/3/{}, a/1/1/3, b/2/2/5, c/3/1/8, d/4/3/12,
+                           e/5/1/15, f/6/2/21, g/7/1/27, N/8/3/{}} {
+    \ifx\k\empty\else \node[keycell] (\n-0) at (\x,0) {\k}; \fi
+    \foreach \l in {1,...,\h} { \node[cell] (\n-\l) at (\x,\l) {}; }
+  }
+  \foreach \c in {H-3, d-3, d-2, d-1, e-0} {
+    \fill[gray!25] (\c.south west) rectangle (\c.north east);
+    \draw (\c.south west) rectangle (\c.north east); }
+  \node[font=\small] at (e-0) {15};
+  \node[font=\small] at (0,0) {cabecera};
+  \node[draw, fill=white, minimum width=6mm, minimum height=12.6mm, font=\small] at (8,2) {NIL};
+  \foreach \u/\v/\l in {H/a/1, a/b/1, b/c/1, c/d/1, d/e/1, e/f/1, f/g/1, g/N/1,
+                        H/b/2, b/d/2, d/f/2, f/N/2, H/d/3, d/N/3} {
+    \fill (\u-\l.center) circle (1.3pt);
+    \draw[->] (\u-\l.center) -- (\v-\l.west |- \u-\l.center);
+  }
+  \foreach \l in {1,2,3} { \node[font=\scriptsize, anchor=west] at (8.35,\l) {nivel \l}; }
+  \draw[->, line width=1.3pt] (H-3.center) -- (d-3.west);
+  \draw[->, line width=1.3pt] (d-1.center) -- (e-1.west);
+\end{tikzpicture}
+\caption{Skip list con siete claves y $p = 1/2$. Las celdas sombreadas y los
+punteros gruesos muestran la búsqueda de 15: se avanza por el nivel 3 hasta
+12; como el siguiente nodo en los niveles 3 y 2 es mayor que 15, se baja hasta
+el nivel 1, donde el siguiente nodo es 15.}
+\label{fig:skiplist}
+\end{figure}
+
+\paragraph{Operaciones.}
+\begin{itemize}
+  \item \textbf{Búsqueda:} se empieza en el nivel más alto de la cabecera. En
+  cada nivel se avanza mientras la siguiente clave sea menor que la buscada; si
+  no, se baja un nivel. Se termina en el nivel 1.
+  \item \textbf{Inserción:} se busca la posición guardando el último nodo
+  visitado en cada nivel. Luego se decide la altura del nuevo nodo lanzando una
+  ``moneda'': con probabilidad $p$ sube un nivel más, hasta un máximo
+  \texttt{MaxLevel}. Finalmente se actualizan los punteros de los nodos
+  guardados (Figura~\ref{fig:insert}).
+  \item \textbf{Eliminación:} se busca la clave de la misma forma y se
+  actualizan los punteros de sus predecesores en cada nivel donde aparece.
+\end{itemize}
+
+\begin{figure}[!htb]
+\centering
+\begin{tikzpicture}[x=1.12cm, y=4.2mm]
+  \foreach \n/\x/\h/\k in {H/0/3/{}, a/1/1/3, b/2/2/5, c/3/1/8, d/4/3/12,
+                           e/5/1/15, f/7/2/21, g/8/1/27, N/9/3/{}} {
+    \ifx\k\empty\else \node[keycell] (\n-0) at (\x,0) {\k}; \fi
+    \foreach \l in {1,...,\h} { \node[cell] (\n-\l) at (\x,\l) {}; }
+  }
+  % nodo nuevo (altura 2)
+  \node[keycell, dashed, very thick] (x-0) at (6,0) {17};
+  \node[cell, dashed, very thick] (x-1) at (6,1) {};
+  \node[cell, dashed, very thick] (x-2) at (6,2) {};
+  % predecesores cuyos punteros cambian
+  \foreach \c in {d-2, e-1} {
+    \fill[gray!25] (\c.south west) rectangle (\c.north east);
+    \draw (\c.south west) rectangle (\c.north east); }
+  \node[font=\small] at (0,0) {cabecera};
+  \node[draw, fill=white, minimum width=6mm, minimum height=12.6mm, font=\small] at (9,2) {NIL};
+  \foreach \u/\v/\l in {H/a/1, a/b/1, b/c/1, c/d/1, d/e/1, f/g/1, g/N/1,
+                        H/b/2, b/d/2, f/N/2, H/d/3, d/N/3} {
+    \fill (\u-\l.center) circle (1.3pt);
+    \draw[->] (\u-\l.center) -- (\v-\l.west |- \u-\l.center);
+  }
+  % punteros nuevos
+  \foreach \u/\v/\l in {d/x/2, e/x/1, x/f/1, x/f/2} {
+    \fill (\u-\l.center) circle (1.3pt);
+    \draw[->, line width=1.3pt] (\u-\l.center) -- (\v-\l.west |- \u-\l.center);
+  }
+  \node[font=\scriptsize, align=center, above=1mm of x-2] {nuevo nodo\\(altura 2)};
+\end{tikzpicture}
+\caption{Inserción de 17. La moneda sale ``sube'' una vez y ``no sube'' la
+siguiente, así que el nodo tiene altura 2. Solo cambian los punteros de los
+predecesores en esos niveles (celdas sombreadas: 12 en el nivel 2 y 15 en el
+nivel 1); los punteros nuevos se muestran en trazo grueso.}
+\label{fig:insert}
+\end{figure}
+
+\paragraph{Costo.}
+Pugh~\cite{pugh1990} muestra que el número esperado de niveles es del orden de
+$\log_{1/p} n$ y que el costo esperado de las tres operaciones es $O(\log n)$.
+El número esperado de punteros por nodo es $1/(1-p)$, es decir, 2 cuando
+$p = 1/2$, por lo que el espacio esperado es $O(n)$. El peor caso es $O(n)$,
+pero tiene una probabilidad muy baja. Además, como la altura de cada nodo se
+decide al azar, la forma de la estructura no depende del orden en que llegan
+las claves.
+
+\subsection{AVL Tree}
+
+\paragraph{Idea.}
+Un AVL Tree~\cite{avl1962} es un árbol binario de búsqueda con una regla extra:
+para cada nodo, la diferencia de alturas entre su subárbol izquierdo y el
+derecho es como máximo 1. Esa diferencia se llama \emph{factor de balance}.
+
+\paragraph{Operaciones.}
+La búsqueda es la misma que en cualquier árbol binario de búsqueda. La
+inserción y la eliminación también empiezan igual, pero al terminar se
+recorre el camino de vuelta hacia la raíz revisando el factor de balance. Si
+algún nodo queda con factor $+2$ o $-2$, se aplica una rotación simple o doble
+para recuperar el balance (Figura~\ref{fig:avl}).
+
+\begin{figure}[!htb]
+\centering
+\begin{tikzpicture}[level distance=9mm, level 1/.style={sibling distance=15mm}]
+  \begin{scope}
+    \node[tnode] (r) {1}
+      child[missing]
+      child { node[tnode] {2}
+        child[missing]
+        child { node[tnode, fill=gray!25] {3} } };
+    \node[font=\scriptsize, right=1mm of r] {$+2$};
+    \node[font=\small, align=center] at (0.75,-2.75) {después de insertar\\1, 2, 3 (en orden)};
+  \end{scope}
+  \draw[->, thick] (2.4,-0.9) -- node[above, font=\small] {rotación} (4.1,-0.9);
+  \begin{scope}[xshift=5.6cm, yshift=-0.45cm]
+    \node[tnode] {2}
+      child { node[tnode] {1} }
+      child { node[tnode, fill=gray!25] {3} };
+    \node[font=\small, align=center] at (0,-2.3) {árbol AVL\\balanceado};
+  \end{scope}
+\end{tikzpicture}
+\caption{Al insertar claves en orden creciente, el AVL pierde el balance en la
+raíz (factor $+2$) y lo recupera con una rotación simple a la izquierda.}
+\label{fig:avl}
+\end{figure}
+
+\paragraph{Costo.}
+Gracias a la regla de balance, la altura del árbol es como máximo
+aproximadamente $1.44 \log_2(n+2)$~\cite{knuth1998}, así que búsqueda,
+inserción y eliminación cuestan $O(\log n)$ en el \emph{peor caso}. Cada nodo
+guarda la clave, dos punteros y su altura, por lo que el espacio es $O(n)$. A
+diferencia de la skip list, la forma del árbol sí depende del orden en que
+llegan las claves, aunque las rotaciones siempre lo mantienen balanceado.
+
+\subsection{Comparación teórica}
+
+La Tabla~\ref{tab:teoria} junta lo que ya se conoce en la literatura. Las dos
+estructuras tienen el mismo orden de complejidad, pero una da una garantía
+esperada y la otra de peor caso, y mantienen el balance de forma distinta.
+La teoría no dice cuál será más rápida en una computadora real, y eso es lo
+que queremos medir.
+
+\begin{table}[!htb]
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Aspecto} & \textbf{Skip List} & \textbf{AVL Tree} \\
+\midrule
+Búsqueda, inserción, eliminación & $O(\log n)$ esperado & $O(\log n)$ peor caso \\
+Peor caso de una operación       & $O(n)$ (poco probable) & $O(\log n)$ \\
+Espacio                          & $O(n)$ esperado & $O(n)$ \\
+Cómo mantiene el balance         & azar (altura aleatoria) & rotaciones \\
+¿Depende del orden de los datos? & no & sí (cambian las rotaciones) \\
+\bottomrule
+\end{tabular}
+\caption{Comparación teórica según la literatura~\cite{pugh1990,knuth1998}.}
+\label{tab:teoria}
+\end{table}
+
+\subsection{Trabajo relacionado}
+
+El trabajo base es el artículo de Pugh~\cite{pugh1990}, que introduce la skip
+list, analiza su costo esperado y discute la elección de $p$: recomienda
+$p = 1/2$ en general y $p = 1/4$ si se quiere menos variabilidad y menos
+memoria. Pugh también reporta comparaciones de tiempo frente a árboles
+balanceados, pero con el hardware y los compiladores de 1990, por lo que no
+necesariamente representan lo que pasa en una computadora actual.
+
+Como referencia complementaria usamos el survey de Xing, Vadrevu y
+Aref~\cite{vadrevu2024}, que revisa muchas variantes de la skip list
+(deterministas, concurrentes, orientadas a caché y a memoria externa) y su uso
+en bases de datos. Entre las deterministas está la 1-2 skip list de Munro,
+Papadakis y Sedgewick~\cite{munro1992}, equivalente a un árbol 2-3. En este
+proyecto no implementaremos variantes: nos quedamos con la versión básica de
+Pugh.
+
+% ============================================================
+\section{Planteamiento del proyecto}\label{sec:plan}
+
+\subsection{Pregunta de investigación}
+
+\begin{quote}
+\itshape
+¿Cómo se comporta una Skip List frente a un AVL Tree en operaciones de
+búsqueda, inserción y eliminación sobre conjuntos ordenados dinámicos?
+\end{quote}
+
+Para poder responderla con experimentos, la dividimos en dos preguntas más
+concretas:
+\begin{itemize}
+  \item[\textbf{P1.}] ¿Cómo cambia el tiempo de cada operación cuando crece el
+  tamaño de la entrada $n$?
+  \item[\textbf{P2.}] ¿Influye el orden de los datos (aleatorio, ordenado o
+  inverso) en el tiempo de cada estructura?
+\end{itemize}
+
+\subsection{Objetivos}
+
+\paragraph{Objetivo general.}
+Comparar experimentalmente el tiempo de ejecución de una Skip List y de un AVL
+Tree, ambos implementados desde cero, en búsqueda, inserción y eliminación,
+bajo distintos tamaños de entrada y órdenes de los datos.
+
+\paragraph{Objetivos específicos.}
+\begin{itemize}
+  \item[\textbf{O1.}] Implementar una Skip List según el diseño de Pugh~\cite{pugh1990}.
+  \item[\textbf{O2.}] Implementar un AVL Tree con inserción y eliminación balanceadas.
+  \item[\textbf{O3.}] Verificar la correctitud de ambas implementaciones con
+  pruebas automáticas.
+  \item[\textbf{O4.}] Construir un generador de datos y un programa de
+  medición que apliquen las mismas operaciones a ambas estructuras.
+  \item[\textbf{O5.}] Medir, graficar y analizar los tiempos junto con la
+  complejidad teórica de cada estructura.
+\end{itemize}
+
+% ============================================================
+\section{Metodología experimental}\label{sec:metodo}
+
+La Tabla~\ref{tab:diseno} resume el diseño experimental; las subsecciones
+siguientes explican cada parte.
+
+\begin{table}[!htb]
+\centering
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{l X}
+\toprule
+\textbf{Elemento} & \textbf{Decisión} \\
+\midrule
+Estructuras   & Skip List ($p=1/2$, \texttt{MaxLevel}$\,=20$) y AVL Tree, ambas en C++17 desde cero \\
+Claves        & Enteros de 64 bits, sin duplicados \\
+Operaciones   & Inserción, búsqueda (50\,\% claves presentes, 50\,\% ausentes) y eliminación \\
+Tamaños       & $n \in \{10^3,\ 10^4,\ 10^5,\ 10^6\}$ \\
+Orden de datos& Aleatorio, ordenado (creciente) e inverso (decreciente) \\
+Escenarios    & $4 \text{ tamaños} \times 3 \text{ órdenes} = 12$ por estructura \\
+Repeticiones  & 10 por escenario, con semillas distintas \\
+Métrica       & Tiempo promedio por operación (ns) y desviación estándar \\
+Entorno       & Misma máquina y mismas opciones de compilación (\texttt{-O2}) \\
+\bottomrule
+\end{tabularx}
+\caption{Resumen del diseño experimental.}
+\label{tab:diseno}
+\end{table}
+
+\subsection{Implementación y verificación}
+
+Ambas estructuras tendrán la misma interfaz: \texttt{insert(k)},
+\texttt{search(k)} y \texttt{remove(k)}. No usaremos librerías externas para
+las estructuras, para controlar las condiciones del experimento. Elegimos
+$\texttt{MaxLevel} = 20$ porque $\log_2 10^6 \approx 20$ alcanza para el
+tamaño máximo. Si el tiempo lo permite, repetiremos una parte de los
+experimentos con $p = 1/4$.
+
+Antes de medir tiempos verificaremos que ambas implementaciones sean correctas:
+ejecutaremos secuencias aleatorias de operaciones y compararemos los resultados
+con \texttt{std::set}, que se usará solo como referencia en las pruebas y no en
+las mediciones. También revisaremos que el AVL cumpla su condición de balance y
+que cada nivel de la Skip List esté ordenado.
+
+\subsection{Procedimiento de medición}
+
+La Figura~\ref{fig:pipeline} muestra el procedimiento que se aplicará a cada
+combinación de tamaño y orden de datos.
+
+\begin{figure}[!htb]
+\centering
+\begin{tikzpicture}[node distance=4.5mm]
+  \node[stepbox] (gen) {Generar $n$ claves\\(semilla fija)};
+  \node[stepbox, right=of gen] (ins) {\textbf{Insertar}\\$n$ claves};
+  \node[stepbox, right=of ins] (bus) {\textbf{Buscar}\\$n$ consultas};
+  \node[stepbox, right=of bus] (eli) {\textbf{Eliminar}\\$n$ claves};
+  \node[stepbox, right=of eli] (rep) {Repetir\\10 veces};
+  \node[stepbox, right=of rep] (est) {Promedio y\\gráficos};
+  \foreach \u/\v in {gen/ins, ins/bus, bus/eli, eli/rep, rep/est} \draw[->] (\u) -- (\v);
+  \draw[->, dashed] (rep.south) -- ++(0,-4mm) -| node[pos=0.25, below, font=\scriptsize] {nuevas semillas} (gen.south);
+  \draw[decorate, decoration={brace, amplitude=4pt}]
+    ($(ins.north west)+(0,2mm)$) -- ($(eli.north east)+(0,2mm)$)
+    node[midway, above=4pt, font=\scriptsize] {se mide el tiempo de cada operación};
+\end{tikzpicture}
+\caption{Procedimiento experimental para cada tamaño $n$ y orden de datos.
+Ambas estructuras reciben exactamente las mismas claves y consultas.}
+\label{fig:pipeline}
+\end{figure}
+
+En cada repetición, la \textbf{inserción} parte de una estructura vacía y
+recibe las $n$ claves en el orden correspondiente; la \textbf{búsqueda}
+ejecuta $n$ consultas en orden aleatorio sobre la estructura ya construida; y
+la \textbf{eliminación} borra las $n$ claves en el mismo orden de la
+inserción.
+
+Para reducir el ruido de las mediciones, se descartará una primera ejecución
+de calentamiento, no se imprimirá nada mientras se mide y el tiempo se tomará
+con \texttt{std::chrono::steady\_clock} sobre cada lote completo de
+operaciones. Opcionalmente, registraremos también la altura final del AVL y el
+nivel máximo alcanzado por la Skip List, si ayudan a explicar los resultados.
+
+\subsection{Cómo se presentarán los resultados}
+
+Cada gráfico corresponde a una de las preguntas de la Sección~\ref{sec:plan}
+(Tabla~\ref{tab:graficos}). Los gráficos obtenidos se presentan en la
+Sección~\ref{sec:resultados}.
+
+\begin{table}[!htb]
+\centering
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{l l l X}
+\toprule
+\textbf{Gráfico} & \textbf{Eje $x$} & \textbf{Eje $y$} & \textbf{Qué responde} \\
+\midrule
+G1: Búsqueda    & $n$ (escala log) & ns por operación & P1 para la búsqueda, Skip List vs.\ AVL \\
+G2: Inserción   & $n$ (escala log) & ns por operación & P1 para la inserción, Skip List vs.\ AVL \\
+G3: Eliminación & $n$ (escala log) & ns por operación & P1 para la eliminación, Skip List vs.\ AVL \\
+G4: Orden       & orden de datos   & ns por operación & P2: efecto del orden con $n = 10^6$ \\
+\bottomrule
+\end{tabularx}
+\caption{Gráficos planeados y la pregunta que responde cada uno.}
+\label{tab:graficos}
+\end{table}
+
+% ============================================================
+\section{Implementación}\label{sec:impl}
+
+\subsection{Arquitectura hexagonal}
+
+El código sigue una arquitectura hexagonal (\emph{puertos y adaptadores}) con
+una sola clase por archivo. La idea es que el núcleo del proyecto (las
+estructuras y el experimento) no dependa de detalles técnicos como el reloj,
+la forma de generar datos o el formato de salida. La
+Figura~\ref{fig:hexagonal} muestra las tres capas:
+
+\begin{itemize}
+  \item \textbf{Dominio} (\texttt{src/domain}): la interfaz
+  \texttt{OrderedSet} con \texttt{insert}, \texttt{search} y
+  \texttt{remove}, y sus dos implementaciones, \texttt{SkipList} y
+  \texttt{AvlTree}, con sus nodos. No depende de nada más.
+  \item \textbf{Aplicación} (\texttt{src/application}): el caso de uso
+  \texttt{BenchmarkService}, que ejecuta el procedimiento de la
+  Figura~\ref{fig:pipeline}, y \texttt{StatisticsCalculator}. Solo conoce
+  \emph{puertos} (interfaces): \texttt{OrderedSetFactory},
+  \texttt{DatasetGenerator}, \texttt{Timer}, \texttt{ResultRepository} y
+  \texttt{ProgressListener}.
+  \item \textbf{Infraestructura} (\texttt{src/infrastructure}): los
+  \emph{adaptadores} que implementan los puertos:
+  \texttt{SkipListFactory}, \texttt{AvlTreeFactory},
+  \texttt{RandomDatasetGenerator}, \texttt{SteadyClockTimer},
+  \texttt{CsvResultRepository}, \texttt{ConsoleProgressListener} y el
+  \texttt{CommandLineParser}. El archivo \texttt{main.cpp} es la única
+  pieza que conecta todo.
+\end{itemize}
+
+Gracias a esto, agregar una estructura nueva (por ejemplo, un árbol
+rojo-negro) solo requiere implementar \texttt{OrderedSet} y una fábrica, sin
+tocar el caso de uso; y cambiar el formato de salida solo requiere otro
+\texttt{ResultRepository}.
+
+\begin{figure}[!htb]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners=2pt, align=center, font=\small, inner sep=4pt},
+  port/.style={box, fill=gray!12, font=\scriptsize}]
+  \node[box, minimum width=5.6cm, minimum height=1.2cm, fill=gray!30, inner sep=6pt] (dom)
+    {\textbf{Dominio}\\ \texttt{OrderedSet}, \texttt{SkipList}, \texttt{AvlTree}};
+  \node[box, minimum width=13.5cm, minimum height=3.6cm, anchor=center] (app) at (dom) {};
+  \node[font=\small, anchor=north] at (app.north) {\textbf{Aplicación}: \texttt{BenchmarkService}, \texttt{StatisticsCalculator}};
+  \node[port, anchor=west] (p1) at ($(app.west)+(0.15,0.6)$) {\texttt{OrderedSetFactory}};
+  \node[port, anchor=west] (p2) at ($(app.west)+(0.15,-0.6)$) {\texttt{DatasetGenerator}};
+  \node[port, anchor=east] (p3) at ($(app.east)+(-0.15,0.6)$) {\texttt{Timer}};
+  \node[port, anchor=east] (p4) at ($(app.east)+(-0.15,-0.1)$) {\texttt{ResultRepository}};
+  \node[port, anchor=east] (p5) at ($(app.east)+(-0.15,-0.8)$) {\texttt{ProgressListener}};
+  \node[box, below=6mm of app, text width=13cm, font=\scriptsize] (inf)
+    {\textbf{Infraestructura (adaptadores):} \texttt{SkipListFactory}, \texttt{AvlTreeFactory},
+     \texttt{RandomDatasetGenerator}, \texttt{SteadyClockTimer}, \texttt{CsvResultRepository},
+     \texttt{ConsoleProgressListener}, \texttt{CommandLineParser}, \texttt{main.cpp}};
+  \draw[->, dashed] (inf.north) -- node[right, font=\scriptsize] {implementan los puertos} (app.south);
+\end{tikzpicture}
+\caption{Arquitectura hexagonal del proyecto. Las dependencias apuntan hacia
+adentro: la infraestructura conoce a la aplicación y al dominio, pero no al
+revés.}
+\label{fig:hexagonal}
+\end{figure}
+
+\subsection{Detalles de las estructuras}
+
+La \textbf{Skip List} sigue a Pugh~\cite{pugh1990}: una cabecera con
+\texttt{MaxLevel}$=20$ punteros, nodos con un vector de punteros
+\texttt{forward}, altura aleatoria con un \texttt{std::mt19937\_64} con semilla
+y un buffer \texttt{update} reutilizable para no reservar memoria en cada
+operación. Al eliminar se reduce el nivel activo si los niveles superiores
+quedan vacíos.
+
+El \textbf{AVL Tree} usa inserción y eliminación recursivas que devuelven la
+nueva raíz del subárbol y llaman a \texttt{rebalance} al volver; este método
+actualiza la altura y aplica las rotaciones simples o dobles (casos LL, RR, LR
+y RL). Para eliminar un nodo con dos hijos se usa su sucesor, extraído con
+\texttt{removeMin}.
+
+Las claves se generan como enteros de 64 bits distintos; las claves
+insertadas son pares y las consultas ausentes son impares, así el 50\,\% de
+las búsquedas falla con seguridad sin tener que comprobarlo.
+
+\subsection{Verificación}
+
+El programa \texttt{correctness\_tests} prueba ambas estructuras (y la skip
+list también con $p = 1/4$) con casos borde (estructura vacía, duplicados),
+entradas ordenadas e inversas, y 10 secuencias de 50\,000 operaciones
+aleatorias comparadas una por una con \texttt{std::set}. Además, cada cierto
+número de operaciones se llama a \texttt{checkInvariants()}: en el AVL revisa
+el orden de búsqueda, el factor de balance y las alturas guardadas; en la
+skip list revisa que cada nivel esté ordenado y sea sublista del nivel de
+abajo. También se comprueba la cota de altura
+$h \le 1.44 \log_2(n+2)$ del AVL. Todas las pruebas pasaron.
+
+% ============================================================
+\section{Resultados}\label{sec:resultados}
+
+Los experimentos se ejecutaron en una laptop con un AMD Ryzen 5 8645HS (6
+núcleos, 12 hilos) y 16\,GB de RAM, con Windows 11 y GCC 13.1 (\texttt{-O2}).
+Se corrieron los 12 escenarios con 10 repeticiones cada uno, más una corrida de
+calentamiento descartada; el experimento completo tardó unos 3 minutos. Las
+barras de error de los gráficos son la desviación estándar entre
+repeticiones. La Tabla~\ref{tab:res1e6} resume los valores para $n = 10^6$.
+
+\begin{table}[!htb]
+\centering
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{llrrr}
+\toprule
+\textbf{Orden} & \textbf{Operación} & \textbf{Skip List (ns)} & \textbf{AVL (ns)} & \textbf{SL / AVL} \\
+\midrule
+Aleatorio & Búsqueda    & $1859 \pm 197$ & $703 \pm 42$ & 2.6 \\
+          & Inserción   & $1861 \pm 137$ & $934 \pm 54$ & 2.0 \\
+          & Eliminación & $1739 \pm 101$ & $903 \pm 47$ & 1.9 \\
+\midrule
+Ordenado  & Búsqueda    & $1365 \pm 164$ & $580 \pm 70$ & 2.4 \\
+          & Inserción   & $185 \pm 51$   & $110 \pm 26$ & 1.7 \\
+          & Eliminación & $98 \pm 16$    & $84 \pm 15$  & 1.2 \\
+\midrule
+Inverso   & Búsqueda    & $1566 \pm 159$ & $683 \pm 39$ & 2.3 \\
+          & Inserción   & $145 \pm 16$   & $137 \pm 19$ & 1.1 \\
+          & Eliminación & $191 \pm 21$   & $107 \pm 3$  & 1.8 \\
+\bottomrule
+\end{tabular}
+\caption{Tiempo promedio por operación (media $\pm$ desviación estándar) con
+$n = 10^6$.}
+\label{tab:res1e6}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{g1_search.pdf}
+\includegraphics[width=\textwidth]{g2_insert.pdf}
+\includegraphics[width=\textwidth]{g3_remove.pdf}
+\caption{G1--G3: tiempo por operación en función de $n$ (escala logarítmica)
+para cada orden de datos.}
+\label{fig:g123}
+\end{figure}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{g4_orden.pdf}
+\caption{G4: efecto del orden de los datos con $n = 10^6$.}
+\label{fig:g4}
+\end{figure}
+
+\subsection{P1: efecto del tamaño de la entrada}
+
+En las tres operaciones (Figura~\ref{fig:g123}) el AVL es más rápido que la
+skip list para todos los tamaños. Con $n = 10^3$ la diferencia es pequeña
+(por ejemplo, 42\,ns frente a 64\,ns en la búsqueda), pero crece con $n$: con
+datos aleatorios la búsqueda pasa de ser 1.5 veces más lenta en la skip list
+con $n=10^3$ a 2.6 veces con $n=10^6$.
+
+Si el costo fuera solo $O(\log n)$, el tiempo debería crecer de forma lineal
+en un eje logarítmico. Hasta $n = 10^4$ ocurre más o menos así, pero entre
+$10^5$ y $10^6$ el tiempo sube mucho más rápido (la búsqueda en el AVL pasa
+de 155 a 703\,ns). Esto coincide con el momento en que la estructura deja de
+caber en la caché del procesador: con $10^6$ nodos se ocupan decenas de
+megabytes, y cada paso de la búsqueda pasa a ser un acceso a memoria
+principal. La skip list sufre más este efecto porque recorre más nodos por
+búsqueda (en promedio unos $2\log_2 n$ comparaciones con $p=1/2$, frente a
+$\approx\log_2 n$ del AVL) y porque cada nodo guarda sus punteros en un vector
+aparte, lo que agrega un acceso indirecto más por nodo visitado.
+
+\subsection{P2: efecto del orden de los datos}
+
+El orden de los datos tuvo un efecto mucho mayor que la estructura elegida
+(Figura~\ref{fig:g4}). Con $n=10^6$, insertar claves ordenadas fue unas 8
+veces más rápido que insertarlas al azar en el AVL (110 frente a 934\,ns) y
+unas 10 veces en la skip list (185 frente a 1861\,ns). Con claves ordenadas
+cada inserción recorre casi el mismo camino que la anterior, que ya está en
+caché; con claves aleatorias cada inserción toca un camino distinto. La
+búsqueda, en cambio, casi no depende del orden de inserción, porque las
+consultas siempre se hacen en orden aleatorio.
+
+La teoría también se confirma en la forma de las estructuras: la altura del
+AVL sí depende del orden (24 con datos aleatorios y 20 con datos ordenados,
+por debajo de la cota $1.44\log_2(n+2)\approx 28.7$), mientras que el nivel
+máximo de la skip list fue de unos 20 en los tres casos, porque solo depende
+de la moneda y no de las claves.
+
+% ============================================================
+\section{Plan de trabajo}\label{sec:cronograma}
+
+El proyecto va de la semana 9 a la 15 del ciclo. En la semana 9 se entrega
+esta propuesta, las semanas 10 a 14 son las cinco semanas de desarrollo y la
+semana 15 corresponde a la exposición final. La Tabla~\ref{tab:cronograma}
+muestra cómo repartimos el trabajo y el resultado que esperamos tener al final
+de cada semana.
+
+\begin{table}[!htb]
+\centering
+\renewcommand{\arraystretch}{1.25}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{>{\raggedright\arraybackslash}p{4.7cm}*{7}{>{\centering\arraybackslash}p{0.62cm}}>{\raggedright\arraybackslash}p{4.4cm}}
+\toprule
+\textbf{Actividad} & \textbf{S9} & \textbf{S10} & \textbf{S11} & \textbf{S12} & \textbf{S13} & \textbf{S14} & \textbf{S15} & \textbf{Resultado} \\
+\midrule
+Propuesta del proyecto            & \on & & & & & & & Propuesta entregada \\
+Revisión bibliográfica y diseño   & & \on & & & & & & Interfaces y plan de pruebas \\
+Implementación del código         & & & \on & & & & & Código de ambas estructuras \\
+Pruebas y datos de prueba         & & & & \on & & & & Pruebas y generador listos \\
+Experimentos y medición           & & & & & \on & & & Tiempos de los 12 escenarios \\
+Análisis, gráficos y redacción    & & & & & & \on & & Gráficos G1--G4 e informe \\
+Exposición final                  & & & & & & & \on & Presentación \\
+\bottomrule
+\end{tabular}
+\caption{Cronograma seguido por semana del ciclo (S = semana).}
+\label{tab:cronograma}
+\end{table}
+
+% ============================================================
+\section{Conclusiones}\label{sec:conclusiones}
+
+\begin{itemize}
+  \item Cumplimos los objetivos O1--O5: implementamos ambas estructuras desde
+  cero, las verificamos contra \texttt{std::set}, construimos el generador y
+  el programa de medición, y obtuvimos los gráficos G1--G4.
+  \item \textbf{P1.} Ambas estructuras crecen de forma logarítmica mientras
+  caben en caché, y bastante más rápido después. En nuestra implementación el
+  AVL fue más rápido en todas las operaciones y tamaños, entre 1.1 y 2.6 veces,
+  y la ventaja aumentó con $n$.
+  \item \textbf{P2.} El orden de los datos influyó más que la estructura:
+  insertar y eliminar claves ordenadas fue hasta 10 veces más rápido que
+  hacerlo al azar en ambas. La forma de la skip list no dependió del orden,
+  como predice la teoría; la del AVL sí, aunque siempre quedó balanceado.
+  \item La misma complejidad asintótica no implica el mismo rendimiento: el
+  número de nodos visitados y el acceso a memoria explican la diferencia. La
+  principal ventaja práctica de la skip list (su facilidad para versiones
+  concurrentes, como en Redis o RocksDB) no se mide en este experimento
+  secuencial.
+\end{itemize}
+
+\paragraph{Limitaciones y trabajo futuro.}
+Todas las mediciones se hicieron en una sola máquina y con un solo
+compilador. Una skip list con los punteros dentro del mismo bloque de memoria
+que el nodo, o con $p = 1/4$, probablemente reduciría la diferencia; ambas
+variantes se pueden probar con el código actual solo agregando una fábrica o
+cambiando la opción \texttt{--p}.
+
+\paragraph{Reproducibilidad.}
+El código, las pruebas, los resultados en CSV y el script de gráficos están
+en el repositorio del proyecto. Para repetir todo:
+\texttt{./build.sh}, \texttt{./build/correctness\_tests},
+\texttt{./build/benchmark --out results} y
+\texttt{python scripts/plot\_results.py}.
+
+% ============================================================
+\begin{thebibliography}{9}
+\small
+\setlength{\itemsep}{1pt}
+
+\bibitem{pugh1990}
+W.~Pugh.
+\newblock Skip lists: A probabilistic alternative to balanced trees.
+\newblock \emph{Communications of the ACM}, 33(6):668--676, 1990.
+\newblock \url{https://doi.org/10.1145/78973.78977}
+
+\bibitem{vadrevu2024}
+L.~Xing, V.~S.~P.~K.~Vadrevu y W.~G.~Aref.
+\newblock The ubiquitous skiplist: A survey of what cannot be skipped about the
+skiplist and its applications in data systems.
+\newblock \emph{ACM Computing Surveys}, 57(11):1--37, 2025.
+\newblock \url{https://doi.org/10.1145/3736754}
+
+\bibitem{avl1962}
+G.~M.~Adel'son-Vel'skii y E.~M.~Landis.
+\newblock An algorithm for the organization of information.
+\newblock \emph{Soviet Mathematics Doklady}, 3:1259--1263, 1962.
+
+\bibitem{knuth1998}
+D.~E.~Knuth.
+\newblock \emph{The Art of Computer Programming, Vol.~3: Sorting and
+Searching}, 2.\textsuperscript{a} ed.
+\newblock Addison-Wesley, 1998.
+
+\bibitem{munro1992}
+J.~I.~Munro, T.~Papadakis y R.~Sedgewick.
+\newblock Deterministic skip lists.
+\newblock En \emph{Proceedings of the Third Annual ACM-SIAM Symposium on
+Discrete Algorithms (SODA)}, pp.~367--375, 1992.
+
+\end{thebibliography}
+
+\end{document}

@@ -2,8 +2,8 @@
 
 Combina:
   results/summary.csv      -> AVL + SkipList p=0.50  (n 1K-1M, 10 reps)
-  results/p025/summary.csv -> AVL + SkipList p=0.25  (n 1K-1M, 5 reps)
-  results/p080/summary.csv -> AVL + SkipList p=0.80  (n 1K-100K, 5 reps)
+  results/p025/summary.csv -> SkipList p=0.25        (n 1K-1M, 10 reps)
+  results/p080/summary.csv -> SkipList p=0.80        (n 1K-100K, 10 reps)
 
 Figuras generadas en figures/:
   c1_search.pdf   - Busqueda: ns/op vs n por orden (G1-style, 4 series)
@@ -46,22 +46,20 @@ LABELS  = list(STYLES.keys())
 # ── Carga y etiquetado ────────────────────────────────────────────────────────
 def load_and_label() -> pd.DataFrame:
     frames = []
-    for csv, skip_label in [(CSV_050, "SL p=0.50"),
-                             (CSV_025, "SL p=0.25"),
-                             (CSV_080, "SL p=0.80")]:
-        df = pd.read_csv(csv)
-        avl  = df[df["structure"] == "AVL"].copy()
-        skip = df[df["structure"].str.startswith("SkipList")].copy()
-        avl["label"]  = "AVL"
-        skip["label"] = skip_label
-        frames += [avl, skip]
+    df_050 = pd.read_csv(CSV_050)
+    avl = df_050[df_050["structure"] == "AVL"].copy()
+    avl["label"] = "AVL"
+    frames.append(avl)
 
-    combined = pd.concat(frames, ignore_index=True)
-    # De-duplicar AVL (aparece en las tres corridas, tomamos la de p=0.50 que tiene 10 reps)
-    avl_050 = combined[(combined["label"] == "AVL") &
-                       (combined["repetitions"] == 10)]
-    rest    = combined[combined["label"] != "AVL"]
-    return pd.concat([avl_050, rest], ignore_index=True)
+    for csv, skip_label in [(CSV_050, "SL p=0.50"),
+                            (CSV_025, "SL p=0.25"),
+                            (CSV_080, "SL p=0.80")]:
+        df = pd.read_csv(csv)
+        skip = df[df["structure"].str.startswith("SkipList")].copy()
+        skip["label"] = skip_label
+        frames.append(skip)
+
+    return pd.concat(frames, ignore_index=True)
 
 
 # ── Figura estilo G1-G3 ───────────────────────────────────────────────────────

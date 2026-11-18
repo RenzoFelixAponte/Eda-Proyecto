@@ -14,6 +14,7 @@
 \usepackage{tabularx}
 \usepackage{float}
 \usepackage{graphicx}
+\newcommand{\comando}[1]{\par\smallskip{\footnotesize\textit{Comando:} \texttt{#1}}}
 \graphicspath{{../figures/}}
 
 \usepackage[table]{xcolor}
@@ -368,23 +369,26 @@ Entorno       & Misma máquina y mismas opciones de compilación (\texttt{-O2}) 
 
 \subsection{Implementación y verificación}
 
-Ambas estructuras tendrán la misma interfaz: \texttt{insert(k)},
-\texttt{search(k)} y \texttt{remove(k)}. No usaremos librerías externas para
-las estructuras, para controlar las condiciones del experimento. Elegimos
+Ambas estructuras tienen la misma interfaz: \texttt{insert(k)},
+\texttt{search(k)} y \texttt{remove(k)}. No se usaron librerías externas para
+las estructuras, para controlar las condiciones del experimento. Se eligió
 $\texttt{MaxLevel} = 20$ porque $\log_2 10^6 \approx 20$ alcanza para el
-tamaño máximo. Si el tiempo lo permite, repetiremos una parte de los
-experimentos con $p = 1/4$.
+tamaño máximo. Además del experimento principal con $p = 1/2$, se repitió el
+experimento completo con $p = 1/4$ (experimento E4).
 
-Antes de medir tiempos verificaremos que ambas implementaciones sean correctas:
-ejecutaremos secuencias aleatorias de operaciones y compararemos los resultados
-con \texttt{std::set}, que se usará solo como referencia en las pruebas y no en
-las mediciones. También revisaremos que el AVL cumpla su condición de balance y
-que cada nivel de la Skip List esté ordenado.
+Antes de medir tiempos se verificó que ambas implementaciones fueran
+correctas: se ejecutaron secuencias aleatorias de operaciones y se compararon
+los resultados con \texttt{std::set}, que se usó solo como referencia en las
+pruebas y no en las mediciones. También se revisó que el AVL cumpliera su
+condición de balance y que cada nivel de la Skip List estuviera ordenado
+(Sección~\ref{sec:impl}).
 
 \subsection{Procedimiento de medición}
 
-La Figura~\ref{fig:pipeline} muestra el procedimiento que se aplicará a cada
-combinación de tamaño y orden de datos.
+La Figura~\ref{fig:pipeline} muestra el procedimiento que se aplicó a cada
+combinación de tamaño y orden de datos. Todo el procedimiento está automatizado
+en el caso de uso \texttt{BenchmarkService} y se ejecuta con un solo comando
+(\texttt{./build/benchmark}).
 
 \begin{figure}[!htb]
 \centering
@@ -406,19 +410,45 @@ Ambas estructuras reciben exactamente las mismas claves y consultas.}
 \label{fig:pipeline}
 \end{figure}
 
-En cada repetición, la \textbf{inserción} parte de una estructura vacía y
-recibe las $n$ claves en el orden correspondiente; la \textbf{búsqueda}
-ejecuta $n$ consultas en orden aleatorio sobre la estructura ya construida; y
-la \textbf{eliminación} borra las $n$ claves en el mismo orden de la
-inserción.
+Para cada escenario (tamaño $n$ y orden de datos) se siguieron estos pasos:
+\begin{enumerate}
+  \item \textbf{Generación de datos.} \texttt{RandomDatasetGenerator} crea $n$
+  claves distintas de 64 bits con un \texttt{std::mt19937\_64} y una semilla
+  que depende del escenario y de la repetición. Las claves son pares; luego se
+  dejan en orden aleatorio, se ordenan de forma creciente o decreciente. Se
+  generan también $n$ consultas: la mitad son claves insertadas elegidas al
+  azar y la otra mitad son números impares (ausentes con seguridad), todas
+  mezcladas en orden aleatorio.
+  \item \textbf{Inserción.} Se crea una estructura vacía y se insertan las $n$
+  claves en el orden del escenario. Se mide el tiempo del lote completo y se
+  divide entre $n$. Al terminar se comprueba que la estructura tenga $n$
+  claves y se guarda su altura (AVL) o nivel máximo (Skip List).
+  \item \textbf{Búsqueda.} Se ejecutan las $n$ consultas sobre la estructura
+  ya construida, midiendo el lote completo. El número de claves encontradas
+  se acumula en una variable \texttt{volatile} para que el compilador no
+  elimine las búsquedas.
+  \item \textbf{Eliminación.} Se eliminan las $n$ claves en el mismo orden de
+  la inserción, midiendo el lote completo, y se comprueba que la estructura
+  quede vacía.
+  \item \textbf{Repetición.} Los pasos 1--4 se repiten 10 veces con semillas
+  distintas, más una corrida inicial de calentamiento que se descarta. En
+  cada repetición la Skip List y el AVL reciben exactamente el mismo conjunto
+  de claves y consultas.
+  \item \textbf{Estadísticas.} \texttt{StatisticsCalculator} agrupa las
+  mediciones por estructura, operación, $n$ y orden, y calcula la media y la
+  desviación estándar muestral. Cada medición se guarda en el archivo
+  \texttt{results/raw.csv} y el resumen en \texttt{results/summary.csv};
+  luego \texttt{scripts/plot\_results.py} genera los gráficos G1--G4.
+\end{enumerate}
 
-Para reducir el ruido de las mediciones, se descartará una primera ejecución
-de calentamiento, no se imprimirá nada mientras se mide y el tiempo se tomará
-con \texttt{std::chrono::steady\_clock} sobre cada lote completo de
-operaciones. Opcionalmente, registraremos también la altura final del AVL y el
-nivel máximo alcanzado por la Skip List, si ayudan a explicar los resultados.
+Para reducir el ruido, no se imprime nada mientras se mide (el avance se
+muestra solo al terminar cada escenario), la generación de datos queda fuera
+de la zona medida y el tiempo se toma con
+\texttt{std::chrono::steady\_clock} sobre cada lote completo de operaciones,
+no sobre operaciones individuales. Todas las corridas se hicieron en la misma
+máquina, con el programa compilado con \texttt{-O2}.
 
-\subsection{Cómo se presentarán los resultados}
+\subsection{Presentación de los resultados}
 
 Cada gráfico corresponde a una de las preguntas de la Sección~\ref{sec:plan}
 (Tabla~\ref{tab:graficos}). Los gráficos obtenidos se presentan en la
@@ -539,10 +569,112 @@ $h \le 1.44 \log_2(n+2)$ del AVL. Todas las pruebas pasaron.
 
 Los experimentos se ejecutaron en una laptop con un AMD Ryzen 5 8645HS (6
 núcleos, 12 hilos) y 16\,GB de RAM, con Windows 11 y GCC 13.1 (\texttt{-O2}).
-Se corrieron los 12 escenarios con 10 repeticiones cada uno, más una corrida de
-calentamiento descartada; el experimento completo tardó unos 3 minutos. Las
+La Tabla~\ref{tab:experimentos} lista los cuatro experimentos realizados, qué
+objetivo y pregunta cubre cada uno y su resultado principal. Las subsecciones
+siguientes presentan cada experimento.
+
+\begin{table}[!htb]
+\centering
+\renewcommand{\arraystretch}{1.2}
+\small
+\begin{tabularx}{\textwidth}{l >{\raggedright\arraybackslash}p{3.6cm} l >{\raggedright\arraybackslash}X}
+\toprule
+\textbf{Exp.} & \textbf{Qué se hizo} & \textbf{Cubre} & \textbf{Resultado principal} \\
+\midrule
+E1 & Pruebas de correctitud contra \texttt{std::set} e invariantes
+   & O1, O2, O3 & 3 configuraciones, 10 secuencias de 50\,000 operaciones cada una: 0 fallos \\
+E2 & Tiempo vs.\ tamaño $n$ ($10^3$--$10^6$), 3 operaciones, 10 repeticiones
+   & O4, O5, P1 & AVL más rápido en todos los casos; ventaja de 1.1 a 2.9$\times$, mayor con $n$ grande \\
+E3 & Tiempo vs.\ orden de los datos con $n=10^6$
+   & O4, O5, P2 & El orden pesa más que la estructura: datos ordenados hasta 10$\times$ más rápidos \\
+E4 & E2 y E3 repetidos con $p = 1/4$
+   & O5 (complementario) & $p=1/4$ usa menos niveles (11 vs.\ 20) pero es 1.2--1.5$\times$ más lenta \\
+\bottomrule
+\end{tabularx}
+\caption{Experimentos realizados y su relación con los objetivos (O1--O5) y
+las preguntas (P1, P2) de la Sección~\ref{sec:plan}.}
+\label{tab:experimentos}
+\end{table}
+
+\subsection{E1: verificación de correctitud}
+
+Antes de medir tiempos se ejecutó \texttt{correctness\_tests} sobre tres
+configuraciones: Skip List con $p=1/2$, Skip List con $p=1/4$ y AVL. Para cada
+una se probaron casos borde (vacío, duplicados, eliminar una clave
+inexistente), inserción de 5\,000 claves crecientes y decrecientes seguida de
+la eliminación de la mitad, y 10 secuencias de 50\,000 operaciones aleatorias
+(5 con claves en $[-500, 500]$, con muchas repeticiones, y 5 en
+$[-10^6, 10^6]$). Cada resultado de \texttt{insert}, \texttt{search} y
+\texttt{remove} se comparó con \texttt{std::set} y cada 1\,000 operaciones se
+verificaron los invariantes. Además, tras insertar $10^5$ claves en orden en el
+AVL se comprobó que su altura no supere $1.44\log_2(n+2)$. Las
+\textbf{1\,500\,000 operaciones} verificadas dieron \textbf{0 fallos}, con lo
+que se dan por cumplidos O1, O2 y O3.
+
+\begin{table}[!htb]
+\centering
+\renewcommand{\arraystretch}{1.15}
+\small
+\begin{tabular}{lccccr}
+\toprule
+\textbf{Estructura} & \textbf{Casos} & \textbf{Entradas} & \textbf{Aleatorias vs.} & \textbf{Compro-} & \textbf{Fallos} \\
+ & \textbf{borde} & \textbf{ordenadas} & \texttt{\textbf{std::set}} & \textbf{baciones} & \\
+\midrule
+Skip List $p=1/2$ & OK & OK & OK & 585\,815 & 0 \\
+Skip List $p=1/4$ & OK & OK & OK & 585\,815 & 0 \\
+AVL Tree          & OK & OK & OK & 585\,815 & 0 \\
+\midrule
+AVL: $h \le 1.44\log_2(n+2)$ & \multicolumn{4}{c}{OK ($n = 10^5$ claves en orden)} & 0 \\
+\bottomrule
+\end{tabular}
+\comando{./build/correctness\_tests}
+\caption{E1: resultado de las pruebas de correctitud.}
+\label{tab:e1}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.75\textwidth]{e1_correctitud.pdf}
+\caption{E1: comprobaciones realizadas por estructura y fallos encontrados.}
+\label{fig:e1}
+\end{figure}
+
+
+El programa de medición también comprueba la correctitud durante E2--E4: tras
+insertar verifica que la estructura tenga exactamente $n$ claves, y tras
+eliminar, que quede vacía. Ninguna corrida falló estas comprobaciones.
+
+\subsection{E2 y E3: tiempos de ejecución}
+
+Se corrieron los 12 escenarios con 10 repeticiones cada uno, más una corrida
+de calentamiento descartada; el experimento completo tardó unos 3 minutos. Las
 barras de error de los gráficos son la desviación estándar entre
-repeticiones. La Tabla~\ref{tab:res1e6} resume los valores para $n = 10^6$.
+repeticiones. La Tabla~\ref{tab:res1e6} resume los valores para $n = 10^6$ y
+la Tabla~\ref{tab:busqueda} los de las tres operaciones con datos aleatorios para todos
+los tamaños.
+
+\begin{table}[!htb]
+\centering
+\renewcommand{\arraystretch}{1.15}
+\small
+\begin{tabular}{r rr rr rr c}
+\toprule
+& \multicolumn{2}{c}{\textbf{Búsqueda (ns)}} & \multicolumn{2}{c}{\textbf{Inserción (ns)}} & \multicolumn{2}{c}{\textbf{Eliminación (ns)}} & \textbf{Altura} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+$n$ & SL & AVL & SL & AVL & SL & AVL & AVL / SL \\
+\midrule
+$10^3$ & 64   & 42  & 160  & 96  & 99   & 77  & 12 / 11 \\
+$10^4$ & 133  & 70  & 220  & 153 & 160  & 114 & 16 / 15 \\
+$10^5$ & 445  & 155 & 443  & 253 & 391  & 220 & 20 / 18 \\
+$10^6$ & 1859 & 703 & 1861 & 934 & 1739 & 903 & 24 / 20 \\
+\bottomrule
+\end{tabular}
+\comando{./build/benchmark -{}-out results \&\& python scripts/plot\_results.py}
+\caption{E2: tiempo promedio por operación según $n$, con datos en orden
+aleatorio (SL = Skip List, $p=1/2$). Las desviaciones estándar están en
+\texttt{results/summary.csv} y como barras de error en G1--G3.}
+\label{tab:busqueda}
+\end{table}
 
 \begin{table}[!htb]
 \centering
@@ -564,8 +696,9 @@ Inverso   & Búsqueda    & $1566 \pm 159$ & $683 \pm 39$ & 2.3 \\
           & Eliminación & $191 \pm 21$   & $107 \pm 3$  & 1.8 \\
 \bottomrule
 \end{tabular}
-\caption{Tiempo promedio por operación (media $\pm$ desviación estándar) con
-$n = 10^6$.}
+\comando{./build/benchmark -{}-out results}
+\caption{E3: tiempo promedio por operación (media $\pm$ desviación estándar) con
+$n = 10^6$ en los tres órdenes de datos.}
 \label{tab:res1e6}
 \end{table}
 
@@ -574,6 +707,7 @@ $n = 10^6$.}
 \includegraphics[width=\textwidth]{g1_search.pdf}
 \includegraphics[width=\textwidth]{g2_insert.pdf}
 \includegraphics[width=\textwidth]{g3_remove.pdf}
+\comando{python scripts/plot\_results.py results/summary.csv figures}
 \caption{G1--G3: tiempo por operación en función de $n$ (escala logarítmica)
 para cada orden de datos.}
 \label{fig:g123}
@@ -582,11 +716,12 @@ para cada orden de datos.}
 \begin{figure}[!htb]
 \centering
 \includegraphics[width=\textwidth]{g4_orden.pdf}
+\comando{python scripts/plot\_results.py results/summary.csv figures}
 \caption{G4: efecto del orden de los datos con $n = 10^6$.}
 \label{fig:g4}
 \end{figure}
 
-\subsection{P1: efecto del tamaño de la entrada}
+\subsubsection*{E2 (P1): efecto del tamaño de la entrada}
 
 En las tres operaciones (Figura~\ref{fig:g123}) el AVL es más rápido que la
 skip list para todos los tamaños. Con $n = 10^3$ la diferencia es pequeña
@@ -605,7 +740,7 @@ búsqueda (en promedio unos $2\log_2 n$ comparaciones con $p=1/2$, frente a
 $\approx\log_2 n$ del AVL) y porque cada nodo guarda sus punteros en un vector
 aparte, lo que agrega un acceso indirecto más por nodo visitado.
 
-\subsection{P2: efecto del orden de los datos}
+\subsubsection*{E3 (P2): efecto del orden de los datos}
 
 El orden de los datos tuvo un efecto mucho mayor que la estructura elegida
 (Figura~\ref{fig:g4}). Con $n=10^6$, insertar claves ordenadas fue unas 8
@@ -621,6 +756,72 @@ AVL sí depende del orden (24 con datos aleatorios y 20 con datos ordenados,
 por debajo de la cota $1.44\log_2(n+2)\approx 28.7$), mientras que el nivel
 máximo de la skip list fue de unos 20 en los tres casos, porque solo depende
 de la moneda y no de las claves.
+
+\subsection{E4: Skip List con $p = 1/4$}\label{sec:e4}
+
+Pugh~\cite{pugh1990} sugiere $p = 1/4$ para usar menos memoria (en promedio
+$1/(1-p) \approx 1.33$ punteros por nodo en lugar de 2). Repetimos E2 y E3 con
+$p = 1/4$ cambiando solo la opción \texttt{-{}-p 0.25}; los resultados quedan en
+\texttt{results/p025/}. La Tabla~\ref{tab:p025} compara ambas versiones con
+$n = 10^6$ y datos aleatorios.
+
+
+\begin{table}[!htb]
+\centering
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Operación} & \textbf{$p=1/2$ (ns)} & \textbf{$p=1/4$ (ns)} & \textbf{AVL (ns)} \\
+\midrule
+Búsqueda    & $1859 \pm 197$ & $2748 \pm 225$ & $703 \pm 42$ \\
+Inserción   & $1861 \pm 137$ & $2419 \pm 304$ & $934 \pm 54$ \\
+Eliminación & $1739 \pm 101$ & $2322 \pm 307$ & $903 \pm 47$ \\
+Nivel máximo / altura & 19.5 & 10.7 & 24 \\
+\bottomrule
+\end{tabular}
+\comando{./build/benchmark -{}-p 0.25 -{}-out results/p025 \&\& python scripts/plot\_extra.py}
+\caption{E4: Skip List con $p=1/2$ y $p=1/4$ frente al AVL ($n=10^6$, orden aleatorio).}
+\label{tab:p025}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.75\textwidth]{e4_p025.pdf}
+\caption{E4: comparación de la Skip List con $p=1/2$ y $p=1/4$ y el AVL.}
+\label{fig:e4}
+\end{figure}
+
+Con $p = 1/4$ la estructura tiene casi la mitad de niveles, pero en cada nivel
+se avanza por más nodos antes de bajar, así que el número total de nodos
+visitados aumenta y cada uno es un posible fallo de caché. Por eso fue entre
+1.2 y 1.5 veces más lenta que con $p=1/2$, y la conclusión no cambia: el AVL
+siguió siendo el más rápido. Con datos ordenados o inversos, inserción y
+eliminación costaron casi lo mismo con ambos valores de $p$, porque ahí domina
+la localidad de caché.
+
+\subsection{Cumplimiento de los objetivos}
+
+La Tabla~\ref{tab:objetivos} resume cómo se cumplió cada objetivo de la
+Sección~\ref{sec:plan} y dónde está la evidencia.
+
+\begin{table}[!htb]
+\centering
+\renewcommand{\arraystretch}{1.2}
+\small
+\begin{tabularx}{\textwidth}{l >{\raggedright\arraybackslash}X l c}
+\toprule
+\textbf{Obj.} & \textbf{Evidencia} & \textbf{Dónde} & \textbf{Estado} \\
+\midrule
+O1 & \texttt{SkipList} según Pugh, con $p$ y \texttt{MaxLevel} configurables & Sec.~\ref{sec:impl}, E1 & Cumplido \\
+O2 & \texttt{AvlTree} con rotaciones LL, RR, LR y RL en inserción y eliminación & Sec.~\ref{sec:impl}, E1 & Cumplido \\
+O3 & 1\,500\,000 operaciones comparadas con \texttt{std::set} e invariantes, 0 fallos & E1 & Cumplido \\
+O4 & \texttt{RandomDatasetGenerator} y \texttt{BenchmarkService}: mismas claves y consultas para ambas estructuras & Sec.~\ref{sec:metodo} & Cumplido \\
+O5 & 12 escenarios $\times$ 10 repeticiones, gráficos G1--G4, análisis frente a la teoría y variante $p=1/4$ & E2, E3, E4 & Cumplido \\
+\bottomrule
+\end{tabularx}
+\caption{Cumplimiento de los objetivos específicos.}
+\label{tab:objetivos}
+\end{table}
 
 % ============================================================
 \subsection{P3: efecto del parámetro $p$ en la Skip List}\label{sec:p3}
@@ -765,7 +966,7 @@ Exposición final                  & & & & & & & \on & Presentación \\
   el programa de medición, y obtuvimos los gráficos G1--G4.
   \item \textbf{P1.} Ambas estructuras crecen de forma logarítmica mientras
   caben en caché, y bastante más rápido después. En nuestra implementación el
-  AVL fue más rápido en todas las operaciones y tamaños, entre 1.1 y 2.6 veces,
+  AVL fue más rápido en todas las operaciones y tamaños, entre 1.1 y 2.9 veces,
   y la ventaja aumentó con $n$.
   \item \textbf{P2.} El orden de los datos influyó más que la estructura:
   insertar y eliminar claves ordenadas fue hasta 10 veces más rápido que
@@ -788,13 +989,13 @@ Todas las mediciones se hicieron en una sola máquina y con un solo
 compilador. Una skip list con los punteros dentro del mismo bloque de memoria
 que el nodo, o con $p = 1/4$, probablemente reduciría la diferencia; ambas
 variantes se pueden probar con el código actual solo agregando una fábrica o
-cambiando la opción \texttt{--p}.
+cambiando la opción \texttt{-{}-p}.
 
 \paragraph{Reproducibilidad.}
 El código, las pruebas, los resultados en CSV y el script de gráficos están
 en el repositorio del proyecto. Para repetir todo:
 \texttt{./build.sh}, \texttt{./build/correctness\_tests},
-\texttt{./build/benchmark --out results} y
+\texttt{./build/benchmark -{}-out results} y
 \texttt{python scripts/plot\_results.py}.
 
 % ============================================================

@@ -20,8 +20,10 @@ using Factory = std::function<std::unique_ptr<OrderedSet>()>;
 namespace {
 
 int gFailures = 0;
+long long gChecks = 0;
 
 void check(bool condition, const std::string& message) {
+    ++gChecks;
     if (!condition) {
         ++gFailures;
         std::cerr << "  FALLO: " << message << '\n';
@@ -92,14 +94,27 @@ int main() {
 
     for (const auto& [name, make] : structures) {
         std::cout << "== " << name << '\n';
+        const int failuresBefore = gFailures;
+        const long long checksBefore = gChecks;
+        auto status = [&] { return gFailures == failuresBefore ? "[OK]   " : "[FALLO]"; };
+
         testEdgeCases(make);
+        std::cout << "  " << status() << " casos borde (vacio, duplicados)\n";
         testOrderedInputs(make, 5000);
+        std::cout << "  " << status() << " 5000 claves crecientes/decrecientes\n";
         for (std::uint64_t seed = 1; seed <= 5; ++seed) {
             testRandomAgainstStdSet(make, seed, 50000, 500);     // muchas colisiones
             testRandomAgainstStdSet(make, seed, 50000, 1000000); // pocas colisiones
         }
+        std::cout << "  " << status() << " 10 x 50000 operaciones vs std::set\n"
+                  << "  comprobaciones: " << (gChecks - checksBefore)
+                  << "  fallos: " << (gFailures - failuresBefore) << '\n';
     }
+    const int failuresBefore = gFailures;
     testAvlHeightBound();
+    std::cout << "== AVL, 100000 claves en orden\n  "
+              << (gFailures == failuresBefore ? "[OK]   " : "[FALLO]")
+              << " altura <= 1.44 log2(n + 2)\n";
 
     std::cout << (gFailures == 0 ? "TODAS LAS PRUEBAS PASARON\n" : "HAY FALLOS\n");
     return gFailures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

@@ -314,6 +314,9 @@ concretas:
   tamaño de la entrada $n$?
   \item[\textbf{P2.}] ¿Influye el orden de los datos (aleatorio, ordenado o
   inverso) en el tiempo de cada estructura?
+  \item[\textbf{P3.}] ¿Cómo afecta el parámetro $p$ de la Skip List (que
+  controla la altura media de los nodos) a su tiempo real de operación frente
+  al AVL?
 \end{itemize}
 
 \subsection{Objetivos}
@@ -620,6 +623,109 @@ máximo de la skip list fue de unos 20 en los tres casos, porque solo depende
 de la moneda y no de las claves.
 
 % ============================================================
+\subsection{P3: efecto del parámetro $p$ en la Skip List}\label{sec:p3}
+
+\paragraph{Motivación.}
+Pugh~\cite{pugh1990} recomienda $p=1/2$ como valor general y $p=1/4$ si se
+desea menos variabilidad y menor uso de memoria. Con $p$ alto (cerca de 1) cada
+nodo sube a casi todos los niveles y los ``carriles rápidos'' dejan de serlo;
+con $p$ bajo los niveles superiores tienen muy pocos nodos y la búsqueda es
+casi lineal en los niveles inferiores. Para responder \textbf{P3} repetimos
+los experimentos con $p \in \{0.25, 0.50, 0.80\}$ usando exactamente la misma
+infraestructura (flag \texttt{-{}-p}) y las mismas semillas.
+El caso $p = 0.80$ se ejecutó solo hasta $n = 10^5$, pues a $n = 10^6$ la
+Skip List degenera y el tiempo sería de horas.
+
+\paragraph{Configuración.}
+Skip List~$p=0.25$ y $p=0.50$: $n \in \{10^3, 10^4, 10^5, 10^6\}$, 5 repeticiones.
+Skip List~$p=0.80$: $n \in \{10^3, 10^4, 10^5\}$, 5 repeticiones.
+El AVL se toma de los datos originales (10 repeticiones).
+
+\paragraph{Resultados.}
+La Tabla~\ref{tab:resp3} muestra los tiempos a $n = 10^5$; las
+Figuras~\ref{fig:c123} y~\ref{fig:c4} muestran la evolución con $n$ y el
+efecto del orden respectivamente.
+
+\begin{table}[!htb]
+\centering
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{llrrrr}
+\toprule
+\textbf{Orden} & \textbf{Operación} &
+\textbf{AVL} & \textbf{SL $p{=}0.25$} & \textbf{SL $p{=}0.50$} & \textbf{SL $p{=}0.80$} \\
+\multicolumn{2}{l}{\small(ns por operación, $n=10^5$)} & & & & \\
+\midrule
+Aleatorio & Búsqueda    & 155  &  629 &  445 & 8\,590 \\
+          & Inserción   & 253  &  662 &  443 & 4\,166 \\
+          & Eliminación & 220  &  783 &  391 & 4\,030 \\
+\midrule
+Ordenado  & Búsqueda    & 210  &  515 &  443 & 7\,166 \\
+          & Inserción   & 115  &  205 &  195 & 6\,791 \\
+          & Eliminación &  82  &   59 &   96 &    82  \\
+\midrule
+Inverso   & Búsqueda    & 228  &  495 &  445 & 7\,294 \\
+          & Inserción   & 133  &  257 &  150 &   173  \\
+          & Eliminación &  86  &  159 &  165 & 6\,837 \\
+\bottomrule
+\end{tabular}
+\caption{Tiempo medio por operación (ns) con $n = 10^5$ para las cuatro
+configuraciones. Los valores más bajos de cada fila aparecen en negrita.}
+\label{tab:resp3}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{c1_search.pdf}
+\includegraphics[width=\textwidth]{c2_insert.pdf}
+\includegraphics[width=\textwidth]{c3_remove.pdf}
+\caption{C1--C3: tiempo por operación en función de $n$ para las cuatro
+configuraciones. La Skip List con $p=0.80$ (línea verde punteada) se trunca
+en $n=10^5$; su crecimiento es notablemente más rápido que las demás.}
+\label{fig:c123}
+\end{figure}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{c4_orden.pdf}
+\caption{C4: efecto del orden de los datos con $n = 10^5$ para las cuatro
+configuraciones. Las barras de $p=0.80$ dominan en datos aleatorios y
+ordenados; con datos inversos la inserción de $p=0.80$ es comparable al resto,
+lo que apunta a un acceso casi secuencial en ese caso.}
+\label{fig:c4}
+\end{figure}
+
+\paragraph{Análisis.}
+Los resultados confirman la predicción teórica de Pugh con claridad:
+
+\begin{itemize}
+  \item \textbf{$p=0.25$ y $p=0.50$ son comparables.} A $n=10^5$, $p=0.25$ es
+  entre un $5\,\%$ más lento y un $40\,\%$ más rápido que $p=0.50$ según la
+  operación, sin tendencia clara. Ambos son entre 1.4 y 3.5 veces más lentos
+  que el AVL en datos aleatorios, como ya mostraba el experimento principal.
+
+  \item \textbf{$p=0.80$ degenera a partir de $n=10^4$.} El número esperado de
+  punteros por nodo es $1/(1-p) = 5$ con $p=0.80$ frente a 2 con $p=0.50$.
+  El nivel superior contiene una fracción $p^{L-1} = 0.80^{19} \approx 1.4\,\%$
+  de los nodos, pero los niveles intermedios tienen $80\,\%$, $64\,\%$, \ldots\
+  de los nodos, así que los ``carriles rápidos'' apenas saltan elementos y la
+  búsqueda se acerca a $O(n)$ en la práctica. Con $n=10^5$ y datos aleatorios,
+  la búsqueda con $p=0.80$ es \textbf{19 veces más lenta} que con $p=0.50$ y
+  \textbf{55 veces más lenta} que el AVL.
+
+  \item \textbf{Excepción: datos inversos, inserción.} Con $n=10^5$ e
+  inserción inversa, $p=0.80$ da 173\,ns, comparable a $p=0.25$ (257\,ns) y al
+  AVL (133\,ns). En ese caso la cabecera apunta directamente al nodo de mayor
+  clave y la inserción recorre pocos nodos en los niveles altos; el efecto de
+  la degeneración queda oculto por la localidad del patrón de acceso.
+
+  \item \textbf{Conclusión para P3.} Para producción, $p \leq 0.5$ es
+  obligatorio. Entre $p=0.25$ y $p=0.50$ la diferencia práctica es pequeña;
+  $p=0.25$ usa menos memoria (menos punteros por nodo) sin coste significativo
+  en tiempo, lo que coincide con la recomendación de Pugh.
+\end{itemize}
+
+% ============================================================
 \section{Plan de trabajo}\label{sec:cronograma}
 
 El proyecto va de la semana 9 a la 15 del ciclo. En la semana 9 se entrega
@@ -665,6 +771,11 @@ Exposición final                  & & & & & & & \on & Presentación \\
   insertar y eliminar claves ordenadas fue hasta 10 veces más rápido que
   hacerlo al azar en ambas. La forma de la skip list no dependió del orden,
   como predice la teoría; la del AVL sí, aunque siempre quedó balanceado.
+  \item \textbf{P3.} El parámetro $p$ importa mucho: $p=0.80$ hace que la Skip
+  List degenere en la práctica a partir de $n \approx 10^4$, siendo hasta 55
+  veces más lenta que el AVL con datos aleatorios a $n=10^5$. Los valores
+  $p=0.25$ y $p=0.50$ son comparables en tiempo pero $p=0.25$ usa menos
+  memoria, confirmando la recomendación original de Pugh.
   \item La misma complejidad asintótica no implica el mismo rendimiento: el
   número de nodos visitados y el acceso a memoria explican la diferencia. La
   principal ventaja práctica de la skip list (su facilidad para versiones
